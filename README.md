@@ -73,7 +73,7 @@ You will know it's active when you see (venv) at the start of your terminal prom
 Step 4: Install Required Libraries
 With your virtual environment active, install all the necessary Python packages with this single command:
 
-pip install streamlit pandas opencv-python requests tqdm Pillow numpy face_recognition
+pip install streamlit pandas opencv-python requests tqdm Pillow numpy face_recognition setuptools<81 deepface
 
 Step 5: Download the AI Models
 This is a critical step. Run the downloader script to fetch the pre-trained models.
