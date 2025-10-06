@@ -1,0 +1,10 @@
+streamlit
+pandas
+opencv-python
+requests
+tqdm
+Pillow
+numpy
+face_recognition
+setuptools<81
+deepface
