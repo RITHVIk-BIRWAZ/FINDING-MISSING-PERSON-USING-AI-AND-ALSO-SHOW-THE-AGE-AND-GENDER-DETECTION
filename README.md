@@ -2,19 +2,14 @@ AI-Powered Missing Person Finder
 This is a complete web application built with Streamlit that helps in reporting and finding missing persons. It leverages AI for age and gender detection from images, facial recognition for matching found persons against the database, and uses an SQLite database to manage records. The application features a public portal for submissions and a secure admin dashboard for managing all reports.
 
 Features
-Admin Dashboard: Secure login for administrators to manage all missing person reports.
-
-Public Portal: Allows the general public to submit new reports and search by image.
-
-AI-Powered Analysis: Automatically detects estimated age and gender from uploaded images using pre-trained CNN models.
-
-Facial Recognition Matching: Upload a photo of a found person to find potential matches in the missing persons database using advanced facial recognition technology.
-
-Database Management: All records are stored and managed in a local SQLite database (created automatically on first run).
-
-Report Management: Admins can update a person's status to "Found" or delete reports entirely.
-
-Dynamic Search: Admins can search for specific reports by name.
+- Admin Dashboard: Secure login, live metrics, geospatial heatmap, and alerts panel for investigators.
+- Public Portal: Submit GPS-aware reports, review safety guidance, or upload a sighting photo for matching (tracking is now handled in the admin console).
+- AI-Powered Analysis: Automatically estimates age/gender (DeepFace) and runs facial + contextual similarity checks to surface likely matches.
+- Notification Center: Every public report or high-confidence match produces a real-time alert with audible/vibration cues plus sidebar badges until an admin reviews it.
+- Matching Queue: Automated pipeline stores match evidence with audit logging so admins can mark items Under Review, Escalated, or Dismissed.
+- Contact & Consent Handling: Reporters must share a reachable phone number and opt into being contacted, enabling rapid follow-ups.
+- Database Management: SQLite schema stores location coordinates, consent flags, and tracking codes; background indexes keep searches fast.
+- Report Management: Admins can triage cases, update statuses (Missing, Under Investigation, Found), and view masked contact details.
 
 Step-by-Step Setup and Execution Guide
 Follow these instructions carefully to get the application running on your local machine.
@@ -71,9 +66,13 @@ source venv/bin/activate
 You will know it's active when you see (venv) at the start of your terminal prompt.
 
 Step 4: Install Required Libraries
-With your virtual environment active, install all the necessary Python packages with this single command:
+With your virtual environment active, pull in the full dependency set (including the browser geolocation helper) with:
 
-pip install streamlit pandas opencv-python requests tqdm Pillow numpy face_recognition setuptools<81 deepface
+pip install -r requirements.txt
+
+or, if you prefer a manual install:
+
+pip install streamlit pandas opencv-python requests tqdm Pillow numpy face_recognition setuptools<81 deepface streamlit_js_eval
 
 Step 5: Download the AI Models
 This is a critical step. Run the downloader script to fetch the pre-trained models.
@@ -102,4 +101,12 @@ Run the following command in your terminal:
 
 streamlit run app.py
 
-Your default web browser will automatically open a new tab with the application running. You can now use the sidebar to switch between the Public Portal and the Admin Section.
+Your default web browser will automatically open a new tab with the application running. You can now use the sidebar to switch between the Public Portal (Submit / Found Someone / Safety Tips) and the Admin Section (Dashboard, Manage Reports, Add Report, Find Matches, Alerts & Matches, Track Reports).
+
+Testing Checklist (recommended before deployment)
+- Public form validation: missing required fields, invalid phone number formats, GPS capture denied, consent unchecked.
+- Tracking portal (admin only): valid vs invalid tracking IDs, records without coordinates.
+- Notification flow: new public report triggers unread alert + audio/vibration popup, marking as read updates counters.
+- Matching pipeline: duplicate photos produce facial matches (status auto-shifts to “Match Found - Await Review”), similar names/locations trigger contextual matches, dismissed items stay archived.
+- Admin actions: status transitions (Missing → Under Investigation → Found), deletion warnings, map rendering for lat/lng edge cases (0 coordinates).
+- Security: invalid admin credentials stay locked out, logout clears session, sensitive contact info only visible after login.

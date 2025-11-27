@@ -8,3 +8,5 @@ numpy
 face_recognition
 setuptools<81
 deepface
+streamlit_js_eval
+pytest
