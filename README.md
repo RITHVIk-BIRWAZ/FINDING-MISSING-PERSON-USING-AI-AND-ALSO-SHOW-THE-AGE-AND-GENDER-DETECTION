@@ -1,5 +1,21 @@
-AI-Powered Missing Person Finder
+# AI-Powered Missing Person Finder
+
+## Project Overview
 This is a complete web application built with Streamlit that helps in reporting and finding missing persons. It leverages AI for age and gender detection from images, facial recognition for matching found persons against the database, and uses an SQLite database to manage records. The application features a public portal for submissions and a secure admin dashboard for managing all reports.
+
+## Technologies Used
+- **Frontend**: Streamlit
+- **Backend**: Python
+- **Database**: SQLite
+- **AI/ML**: OpenCV, DeepFace, Face Recognition
+- **Other Libraries**: Pandas, NumPy, Pillow, Requests, Tqdm
+- **Deployment**: Local or cloud-based (e.g., Streamlit Cloud)
+
+## Usage
+1. Run the application locally using the setup guide below.
+2. Access the Public Portal to submit missing person reports or sightings.
+3. Use the Admin Dashboard to manage reports, view matches, and monitor alerts.
+4. AI features automatically detect age and gender from uploaded images and perform facial matching.
 
 Features
 - Admin Dashboard: Secure login, live metrics, geospatial heatmap, and alerts panel for investigators.

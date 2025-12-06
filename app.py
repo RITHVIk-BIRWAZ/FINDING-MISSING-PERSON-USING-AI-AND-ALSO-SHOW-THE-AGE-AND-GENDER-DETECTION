@@ -518,9 +518,11 @@ def run_matching_pipeline(report_id: int, image_bytes: bytes | None, person_name
 
     if matches_found:
         top_match = matches_found[0]
+        reporter_summary = fetch_person_summary(report_id)
+        reporter_phone = reporter_summary['phone'] if reporter_summary else "N/A"
         create_notification(
             "Potential match detected",
-            f"Report #{report_id} has {len(matches_found)} potential match(es). Highest: {top_match['name']} ({top_match['method']}).",
+            f"Report #{report_id} has {len(matches_found)} potential match(es). Highest: {top_match['name']} ({top_match['method']}). Reporter Phone: {reporter_phone}",
             level="warning",
             payload={"report_id": report_id, "matches": matches_found}
         )
@@ -650,13 +652,6 @@ def report_missing_person_form(source: str = "Public"):
             conn.commit()
             conn.close()
 
-            create_notification(
-                "New missing person report",
-                f"{name} reported via {source}.",
-                level="info",
-                payload={"person_id": person_id, "source": source}
-            )
-
             matches = run_matching_pipeline(person_id, image_bytes, name, last_seen, age_estimate)
 
             st.success(f"Report for {name} submitted successfully.")
@@ -667,35 +662,97 @@ def report_missing_person_form(source: str = "Public"):
                 st.warning(f"{len(matches)} potential match(es) queued for admin review.")
 
 def search_by_image_tab():
-    st.header("Search for a Person by Image")
-    st.info("This feature is a demonstration. A real implementation would use facial recognition to find a match.")
-    uploaded_image = st.file_uploader("Upload image of the person you found", type=['png', 'jpg', 'jpeg'], key="search_uploader")
-    if uploaded_image:
-        st.image(uploaded_image, caption="Uploaded Image", width=300)
-        if st.button("Search Database"):
-            with st.spinner("Analyzing image and searching database..."):
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT id, name, age, gender, last_seen_location, image, status FROM missing_persons WHERE status = 'Missing' ORDER BY RANDOM() LIMIT 1")
-                result = c.fetchone()
-                conn.close()
-                if result:
-                    st.success("Potential Match Found!")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("Uploaded Image Analysis")
-                        age, gender = detect_age_gender(uploaded_image.getvalue())
-                        st.write(f"**Estimated Age:** {age}")
-                        st.write(f"**Estimated Gender:** {gender}")
-                    with col2:
-                        st.subheader("Database Record")
-                        st.write(f"**Name:** {result[1]}")
-                        st.write(f"**Status:** {result[6]}")
-                        st.write(f"**Reported Age:** {result[2]}")
-                        db_image = Image.open(io.BytesIO(result[5]))
-                        st.image(db_image, caption=f"Image of {result[1]}")
-                else:
-                    st.warning("No potential matches found in the active missing persons database.")
+    st.header("Found Someone?")
+    st.write("If you've found someone who might be missing, provide your contact information and location so authorities can follow up.")
+
+    captured_coords = render_location_capture(source="Found")
+
+    with st.form("found_person_form", clear_on_submit=True):
+        st.subheader("Your Contact Information")
+        reporter_phone = st.text_input("Phone Number *")
+        reporter_email = st.text_input("Email (optional)")
+
+        st.subheader("Sighting Details")
+        sighting_location = st.text_input("Where did you find this person? *")
+        additional_notes = st.text_area("Additional details about the sighting")
+
+        uploaded_image = st.file_uploader("Upload a photo of the person you found *", type=['png', 'jpg', 'jpeg'], key="found_uploader")
+
+        st.caption("Fields marked with * are required.")
+
+        submit_button = st.form_submit_button("Submit Sighting Report")
+
+        if submit_button:
+            missing_fields = []
+            if not reporter_phone:
+                missing_fields.append("Phone Number")
+            if not sighting_location:
+                missing_fields.append("Sighting Location")
+            if not uploaded_image:
+                missing_fields.append("Photo")
+            if missing_fields:
+                st.warning("Please complete the following required fields: " + ", ".join(missing_fields))
+                return
+
+            if not is_valid_phone(reporter_phone):
+                st.error("Enter a valid phone number with at least 7 digits.")
+                return
+
+            # Process the sighting report
+            image_bytes = uploaded_image.getvalue()
+            age_estimate, gender_estimate = detect_age_gender(image_bytes)
+
+            lat_value = None
+            lng_value = None
+            accuracy_value = None
+
+            if captured_coords:
+                lat_value = captured_coords['lat']
+                lng_value = captured_coords['lng']
+                accuracy_value = captured_coords['accuracy']
+
+            # Insert sighting as a report
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute(
+                """
+                INSERT INTO missing_persons (
+                    name, age, gender, last_seen_location, description, image, date_reported,
+                    reporter_phone, reporter_email, reporter_consent, location_lat, location_lng,
+                    location_accuracy, reporter_tracking_code, report_source, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "Sighting Report",
+                    age_estimate,
+                    gender_estimate,
+                    sighting_location,
+                    additional_notes,
+                    image_bytes,
+                    datetime.datetime.now(),
+                    reporter_phone,
+                    reporter_email,
+                    1,  # Assume consent for sightings
+                    lat_value,
+                    lng_value,
+                    accuracy_value,
+                    None,  # No tracking code for sightings
+                    "Sighting",
+                    "Sighting Reported"
+                )
+            )
+            sighting_id = c.lastrowid
+            conn.commit()
+            conn.close()
+
+            # Run matching pipeline on the sighting image with the new report_id
+            matches = run_matching_pipeline(sighting_id, image_bytes, "Sighting Report", sighting_location, age_estimate)
+
+            st.success("Sighting report submitted successfully!")
+            st.info("🚔 **Police will follow up with you shortly.** Please keep your phone available for contact from local authorities.")
+            if age_estimate != "N/A" or gender_estimate != "N/A":
+                st.info(f"AI Analysis of photo: Estimated Age {age_estimate}, Estimated Gender {gender_estimate}.")
+            st.warning("Do not approach the person directly. Wait for professional assistance.")
 
 
 def track_report_form():
@@ -936,7 +993,7 @@ def admin_portal():
     emit_admin_toasts()
     menu = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Manage Reports", "Add New Report", "Alerts & Matches", "Track Reports"]
+        ["Dashboard", "Manage Reports", "Add New Report", "Alerts & Matches"]
     )
 
     if menu == "Dashboard":
@@ -1017,7 +1074,7 @@ def admin_portal():
                     col2.write(f"**Date Reported:** {row['date_reported']}")
                     col2.write(f"**Last Seen:** {row['last_seen_location']}")
                     col2.write(f"**Tracking ID:** {row['reporter_tracking_code']}")
-                    col2.write(f"**Reporter Phone:** {mask_phone_number(row['reporter_phone'] or '')}")
+                    col2.write(f"**Reporter Phone:** {row['reporter_phone'] or 'N/A'}")
                     col2.write(f"**Reporter Email:** {row['reporter_email'] or 'N/A'}")
 
                     if details and details[0]:
@@ -1034,16 +1091,27 @@ def admin_portal():
                                 update_status(row['id'], 'Found')
                                 st.success(f"{row['name']} marked as Found.")
                                 st.rerun()
-                    with action_cols[1]:
-                        if st.button("Mark Under Investigation", key=f"in_progress_{row['id']}"):
-                            update_status(row['id'], 'Under Investigation')
-                            st.info(f"{row['name']} flagged for investigation.")
-                            st.rerun()
-                    with action_cols[2]:
-                        if st.button("Delete Report", key=f"delete_{row['id']}"):
-                            delete_report(row['id'])
-                            st.warning(f"Report for {row['name']} deleted.")
-                            st.rerun()
+                        with action_cols[1]:
+                            if st.button("Mark Under Investigation", key=f"in_progress_{row['id']}"):
+                                update_status(row['id'], 'Under Investigation')
+                                st.info(f"{row['name']} flagged for investigation.")
+                                st.rerun()
+                        with action_cols[2]:
+                            if st.button("Delete Report", key=f"delete_{row['id']}"):
+                                delete_report(row['id'])
+                                st.warning(f"Report for {row['name']} deleted.")
+                                st.rerun()
+                    elif row['status'] == 'Under Investigation':
+                        with action_cols[0]:
+                            if st.button("Mark as Found", key=f"found_{row['id']}"):
+                                update_status(row['id'], 'Found')
+                                st.success(f"{row['name']} marked as Found.")
+                                st.rerun()
+                        with action_cols[2]:
+                            if st.button("Delete Report", key=f"delete_{row['id']}"):
+                                delete_report(row['id'])
+                                st.warning(f"Report for {row['name']} deleted.")
+                                st.rerun()
 
     elif menu == "Add New Report":
         report_missing_person_form(source="Admin")
@@ -1051,23 +1119,58 @@ def admin_portal():
     elif menu == "Alerts & Matches":
         render_alerts_and_matches()
 
-    elif menu == "Track Reports":
-        track_report_form()
+
+def lost_lists_tab():
+    st.header("Lost Lists")
+    st.write("Browse the list of missing persons. If you have information about any of these individuals, please report it through the 'Found Someone?' section.")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, name, image, last_seen_location, description
+        FROM missing_persons
+        WHERE status = 'Missing'
+        ORDER BY date_reported DESC
+    """)
+    missing_persons = c.fetchall()
+    conn.close()
+
+    if not missing_persons:
+        st.info("No missing persons reports at the moment.")
+        return
+
+    # Display in a grid format
+    cols = st.columns(3)  # 3 columns per row
+    for i, person in enumerate(missing_persons):
+        person_id, name, image_bytes, last_seen, description = person
+        with cols[i % 3]:
+            with st.container():
+                if image_bytes:
+                    st.image(Image.open(io.BytesIO(image_bytes)), caption=name, width=200)
+                else:
+                    st.image("https://via.placeholder.com/200x200?text=No+Image", caption=name)
+                st.write(f"**{name}**")
+                st.write(f"Last Seen: {last_seen}")
+                if description:
+                    st.caption(description[:100] + "..." if len(description) > 100 else description)
 
 
 def public_portal():
     st.sidebar.title("Public Menu")
-    menu = st.sidebar.radio("Navigation", ["Submit a Report", "Found Someone?", "Safety Tips"])
+    menu = st.sidebar.radio("Navigation", ["Submit a Report", "Found Someone?", "Lost Lists", "Safety Tips"])
     if menu == "Submit a Report":
         report_missing_person_form(source="Public")
     elif menu == "Found Someone?":
         search_by_image_tab()
+    elif menu == "Lost Lists":
+        lost_lists_tab()
     elif menu == "Safety Tips":
         safety_tips_panel()
 
 # --- Main App Logic ---
 def main():
     st.set_page_config(page_title="Missing Person Finder", layout="wide")
+
     init_db()
     
     st.title("AI-Powered Missing Person Finder")
