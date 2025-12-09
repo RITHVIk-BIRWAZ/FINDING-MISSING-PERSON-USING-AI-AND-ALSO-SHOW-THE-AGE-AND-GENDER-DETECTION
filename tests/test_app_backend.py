@@ -143,3 +143,17 @@ def test_run_matching_pipeline_records_matches(monkeypatch, fresh_database):
     assert notifications, "Match pipeline should raise an alert"
     assert "Potential match detected" in notifications[0]["title"]
 
+
+def test_notify_new_submission_creates_admin_alert(fresh_database):
+    app.notify_new_submission(
+        report_id=42,
+        source="Public",
+        tracking_code="TRACK1234",
+        reporter_phone="9999999999",
+    )
+    notifications = app.get_notifications(include_read=True)
+    assert notifications, "Submission should create a notification for admins"
+    note = notifications[0]
+    assert note["title"] == "New report received"
+    assert "TRACK1234" in note["message"]
+

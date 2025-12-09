@@ -265,6 +265,26 @@ def create_notification(title: str, message: str, level: str = 'info', payload: 
     conn.close()
 
 
+def notify_new_submission(report_id: int, source: str, tracking_code: str | None, reporter_phone: str | None):
+    """Create an admin-facing notification for any new report submission."""
+    message_parts = [f"Report #{report_id} submitted via {source} portal."]
+    if tracking_code:
+        message_parts.append(f"Tracking ID: {tracking_code}.")
+    if reporter_phone:
+        message_parts.append(f"Reporter Phone: {reporter_phone}.")
+    create_notification(
+        "New report received",
+        " ".join(message_parts),
+        level="info",
+        payload={
+            "report_id": report_id,
+            "source": source,
+            "tracking_code": tracking_code,
+            "reporter_phone": reporter_phone,
+        },
+    )
+
+
 def get_notifications(include_read: bool = False, limit: int = 20):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -342,6 +362,70 @@ def delete_report(person_id):
         level="warning",
         payload={"person_id": person_id}
     )
+
+
+def get_matched_partner_ids(person_id: int) -> list[int]:
+    """Return other report IDs that are matched to the given person."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    partners: set[int] = set()
+    c.execute(
+        "SELECT candidate_report_id FROM match_results WHERE source_report_id = ? AND candidate_report_id IS NOT NULL",
+        (person_id,),
+    )
+    partners.update(row[0] for row in c.fetchall() if row[0] is not None)
+    c.execute(
+        "SELECT source_report_id FROM match_results WHERE candidate_report_id = ? AND source_report_id IS NOT NULL",
+        (person_id,),
+    )
+    partners.update(row[0] for row in c.fetchall() if row[0] is not None)
+    conn.close()
+    return list(partners)
+
+
+def resolve_match_as_found(person_id: int):
+    """Mark a matched record and any linked reports as Found and resolve their match records."""
+    partner_ids = get_matched_partner_ids(person_id)
+    set_status(person_id, "Found", notify=True)
+    for pid in partner_ids:
+        set_status(pid, "Found", notify=False)
+
+    all_ids = [person_id] + partner_ids
+    placeholders = ",".join("?" for _ in all_ids)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        f"""
+        UPDATE match_results
+        SET status = 'Resolved'
+        WHERE source_report_id IN ({placeholders}) OR candidate_report_id IN ({placeholders})
+        """,
+        all_ids + all_ids,
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_report_and_matches(person_id: int):
+    """Delete a report plus any matched partner reports and clean up match records."""
+    partner_ids = get_matched_partner_ids(person_id)
+    unique_ids = [person_id] + [pid for pid in partner_ids if pid != person_id]
+
+    placeholders = ",".join("?" for _ in unique_ids)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        f"""
+        DELETE FROM match_results
+        WHERE source_report_id IN ({placeholders}) OR candidate_report_id IN ({placeholders})
+        """,
+        unique_ids + unique_ids,
+    )
+    conn.commit()
+    conn.close()
+
+    for pid in unique_ids:
+        delete_report(pid)
 
 
 def get_stats():
@@ -652,6 +736,12 @@ def report_missing_person_form(source: str = "Public"):
             conn.commit()
             conn.close()
 
+            notify_new_submission(
+                report_id=person_id,
+                source=source,
+                tracking_code=tracking_code if source == "Public" else None,
+                reporter_phone=reporter_phone_clean,
+            )
             matches = run_matching_pipeline(person_id, image_bytes, name, last_seen, age_estimate)
 
             st.success(f"Report for {name} submitted successfully.")
@@ -745,6 +835,12 @@ def search_by_image_tab():
             conn.commit()
             conn.close()
 
+            notify_new_submission(
+                report_id=sighting_id,
+                source="Sighting",
+                tracking_code=None,
+                reporter_phone=reporter_phone,
+            )
             # Run matching pipeline on the sighting image with the new report_id
             matches = run_matching_pipeline(sighting_id, image_bytes, "Sighting Report", sighting_location, age_estimate)
 
@@ -1100,6 +1196,17 @@ def admin_portal():
                             if st.button("Delete Report", key=f"delete_{row['id']}"):
                                 delete_report(row['id'])
                                 st.warning(f"Report for {row['name']} deleted.")
+                                st.rerun()
+                    elif row['status'] == 'Match Found - Await Review':
+                        with action_cols[0]:
+                            if st.button("Mark Matched as Found", key=f"found_match_{row['id']}"):
+                                resolve_match_as_found(int(row['id']))
+                                st.success(f"Matched reports for {row['name']} marked as Found.")
+                                st.rerun()
+                        with action_cols[2]:
+                            if st.button("Delete Matched Reports", key=f"delete_match_{row['id']}"):
+                                delete_report_and_matches(int(row['id']))
+                                st.warning(f"Matched reports linked to {row['name']} deleted.")
                                 st.rerun()
                     elif row['status'] == 'Under Investigation':
                         with action_cols[0]:
